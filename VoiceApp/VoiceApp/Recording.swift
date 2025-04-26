@@ -12,4 +12,6 @@ struct Recording: Identifiable, Codable {
     var name: String
     let fileURL: URL
     var date: Date
+    var startTime: TimeInterval?
+    var endTime: TimeInterval?
 }

@@ -1,13 +1,17 @@
 import AVFoundation
 import Combine
 
-class RecordingManager: NSObject, ObservableObject { 
+class RecordingManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    @Published var loopPlayback = false
     private var audioRecorder: AVAudioRecorder?
     private var audioPlayer: AVAudioPlayer?
     @Published var recordings: [Recording] = []
     @Published var isRecording = false
     @Published var isPlaying = false
-    @Published var loopPlayback = false
+    @Published var currentTime: TimeInterval = 0
+    @Published var duration: TimeInterval = 0
+    @Published var playbackSpeed: Float = 1.0
+    private var timer: Timer?
 
     override init() {
         super.init()
@@ -22,11 +26,11 @@ class RecordingManager: NSObject, ObservableObject {
     }
 
     func startRecording() {
-        let fileName = UUID().uuidString + ".m4a"
+        let fileName = UUID().uuidString + ".caf" // .m4a -> .caf
         let fileURL = getDocumentsDirectory().appendingPathComponent(fileName)
 
         let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVFormatIDKey: kAudioFormatAppleLossless, // 互換性向上
             AVSampleRateKey: 44100,
             AVNumberOfChannelsKey: 2,
             AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
@@ -45,7 +49,7 @@ class RecordingManager: NSObject, ObservableObject {
         audioRecorder?.stop()
         isRecording = false
 
-        let recording = Recording(id: UUID(), name: name.isEmpty ? "録音 \(recordings.count + 1)" : name, fileURL: audioRecorder!.url, date: Date())
+        let recording = Recording(id: UUID(), name: name.isEmpty ? "新規録音 \(recordings.count + 1)" : name, fileURL: audioRecorder!.url, date: Date())
         recordings.append(recording)
         saveRecordings()
     }
@@ -53,25 +57,56 @@ class RecordingManager: NSObject, ObservableObject {
     func playRecording(_ recording: Recording) {
         do {
             audioPlayer = try AVAudioPlayer(contentsOf: recording.fileURL)
-            audioPlayer?.isLooping = loopPlayback
+            audioPlayer?.delegate = self
+            audioPlayer?.enableRate = true
+            audioPlayer?.rate = playbackSpeed
+            duration = audioPlayer?.duration ?? 0
             audioPlayer?.play()
             isPlaying = true
-            audioPlayer?.delegate = self
+            startTimer()
         } catch {
             print("再生エラー: \(error)")
         }
     }
 
+    func pausePlaying() {
+        audioPlayer?.pause()
+        isPlaying = false
+        stopTimer()
+    }
+
     func stopPlaying() {
         audioPlayer?.stop()
         isPlaying = false
+        currentTime = 0
+        stopTimer()
     }
 
-    func renameRecording(_ recording: Recording, newName: String) {
-        if let index = recordings.firstIndex(where: { $0.id == recording.id }) {
-            recordings[index].name = newName.isEmpty ? "録音 \(index + 1)" : newName
-            saveRecordings()
+    func seek(to time: TimeInterval) {
+        if let player = audioPlayer {
+            let newTime = max(0, min(time, player.duration))
+            player.currentTime = newTime
+            currentTime = newTime
         }
+    }
+
+    func skipForward(_ seconds: TimeInterval) {
+        if let player = audioPlayer {
+            let newTime = min(player.currentTime + seconds, player.duration)
+            seek(to: newTime)
+        }
+    }
+
+    func skipBackward(_ seconds: TimeInterval) {
+        if let player = audioPlayer {
+            let newTime = max(player.currentTime - seconds, 0)
+            seek(to: newTime)
+        }
+    }
+
+    func setPlaybackSpeed(_ speed: Float) {
+        playbackSpeed = speed
+        audioPlayer?.rate = speed
     }
 
     func deleteRecording(_ recording: Recording) {
@@ -103,17 +138,23 @@ class RecordingManager: NSObject, ObservableObject {
             recordings = (try? JSONDecoder().decode([Recording].self, from: data)) ?? []
         }
     }
-}
 
-extension RecordingManager: AVAudioPlayerDelegate {
+    private func startTimer() {
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            if let player = self?.audioPlayer {
+                self?.currentTime = player.currentTime
+            }
+        }
+    }
+
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         isPlaying = false
-    }
-}
-
-extension AVAudioPlayer {
-    var isLooping: Bool {
-        get { numberOfLoops < 0 }
-        set { numberOfLoops = newValue ? -1 : 0 }
+        currentTime = 0
+        stopTimer()
     }
 }

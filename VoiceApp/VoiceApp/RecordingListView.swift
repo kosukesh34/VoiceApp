@@ -1,17 +1,10 @@
-//
-//  RecordingListView.swift
-//  VoiceApp
-//
-//  Created by Kosuke Shigematsu on 4/26/25.
-//
-
 import SwiftUI
 
 struct RecordingListView: View {
     @EnvironmentObject var recordingManager: RecordingManager
-    @State private var editMode: EditMode = .inactive
-    @State private var renamingRecording: Recording?
-    @State private var newName = ""
+    @State private var selectedRecording: Recording?
+    @State private var playlist: [Recording] = []
+    @State private var isPlayingPlaylist = false
 
     var body: some View {
         NavigationView {
@@ -19,25 +12,14 @@ struct RecordingListView: View {
                 ForEach(recordingManager.recordings) { recording in
                     HStack {
                         Button(action: {
-                            if recordingManager.isPlaying {
-                                recordingManager.stopPlaying()
-                            } else {
-                                recordingManager.playRecording(recording)
-                            }
+                            selectedRecording = recording
+                            recordingManager.playRecording(recording)
                         }) {
-                            Image(systemName: recordingManager.isPlaying ? "stop.circle" : "play.circle")
+                            Image(systemName: "play.circle")
                                 .foregroundColor(.blue)
                         }
-
                         Text(recording.name)
-                            .onTapGesture {
-                                renamingRecording = recording
-                                newName = recording.name
-                            }
                     }
-                }
-                .onMove { indices, newOffset in
-                    recordingManager.moveRecording(from: indices.first!, to: newOffset)
                 }
                 .onDelete { indices in
                     if let index = indices.first {
@@ -47,30 +29,106 @@ struct RecordingListView: View {
             }
             .navigationTitle("録音一覧")
             .toolbar {
-                EditButton()
-            }
-            .environment(\.editMode, $editMode)
-        }
-        .sheet(item: $renamingRecording) { recording in
-            VStack {
-                Text("名前を変更")
-                    .font(.headline)
-                TextField("新しい名前", text: $newName)
-                    .textFieldStyle(.roundedBorder)
-                    .padding()
-                HStack {
-                    Button("キャンセル") {
-                        renamingRecording = nil
-                    }
-                    Spacer()
-                    Button("保存") {
-                        recordingManager.renameRecording(recording, newName: newName)
-                        renamingRecording = nil
-                    }
+                Button(action: {
+                    playlist = recordingManager.recordings
+                    isPlayingPlaylist = true
+                }) {
+                    Text("プレイリスト")
                 }
-                .padding()
             }
-            .padding()
+        }
+        .sheet(isPresented: $isPlayingPlaylist) {
+            PlaylistView(playlist: $playlist, recordingManager: recordingManager)
+        }
+        .overlay(
+            VStack {
+                Spacer()
+                if selectedRecording != nil {
+                    PlaybackControlView(recording: selectedRecording!)
+                }
+            }
+        )
+    }
+}
+
+struct PlaybackControlView: View {
+    @EnvironmentObject var recordingManager: RecordingManager
+    let recording: Recording
+
+    var body: some View {
+        VStack {
+            Slider(value: $recordingManager.currentTime, in: 0...max(recordingManager.duration, 0), step: 0.1, onEditingChanged: { editing in
+                if !editing {
+                    recordingManager.seek(to: recordingManager.currentTime)
+                }
+            })
+            .accentColor(.blue)
+
+            HStack {
+                Text(timeString(from: recordingManager.currentTime))
+                Spacer()
+                Text("-\(timeString(from: max(recordingManager.duration - recordingManager.currentTime, 0)))")
+            }
+            .font(.caption)
+
+            HStack(spacing: 20) {
+                Button(action: {
+                    recordingManager.skipBackward(15)
+                }) {
+                    Image(systemName: "gobackward.15")
+                        .font(.title)
+                }
+
+                Button(action: {
+                    if recordingManager.isPlaying {
+                        recordingManager.pausePlaying()
+                    } else {
+                        recordingManager.playRecording(recording)
+                    }
+                }) {
+                    Image(systemName: recordingManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .resizable()
+                        .frame(width: 50, height: 50)
+                        .foregroundColor(.blue)
+                }
+
+                Button(action: {
+                    recordingManager.skipForward(15)
+                }) {
+                    Image(systemName: "goforward.15")
+                        .font(.title)
+                }
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .shadow(radius: 5)
+    }
+
+    private func timeString(from time: TimeInterval) -> String {
+        let minutes = Int(time) / 60
+        let seconds = Int(time) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+}
+
+struct PlaylistView: View {
+    @Binding var playlist: [Recording]
+    @ObservedObject var recordingManager: RecordingManager
+
+    var body: some View {
+        List {
+            ForEach(playlist) { recording in
+                Text(recording.name)
+            }
+            .onMove { indices, newOffset in
+                playlist.move(fromOffsets: indices, toOffset: newOffset)
+            }
+        }
+        .toolbar {
+            Button("再生") {
+                // プレイリスト再生（未実装）
+            }
         }
     }
 }
